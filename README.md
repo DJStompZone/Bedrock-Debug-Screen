@@ -23,7 +23,7 @@ Your world will need to enable the Beta APIs in the game settings for this addon
 
 Once you are playing, bring up the chat menu (default key binding is <kbd>T</kbd>). Then, type
 
-    !debug on
+    ?debug on
 
 and press enter. When you close the chat window, you'll now see a debug screen like this:
 
@@ -31,7 +31,7 @@ and press enter. When you close the chat window, you'll now see a debug screen l
 
 When you no longer want to see this information, open the chat menu again and type
 
-    !debug off
+    ?debug off
 
 then press enter. Now when you close the window that debug screen will go away.
 

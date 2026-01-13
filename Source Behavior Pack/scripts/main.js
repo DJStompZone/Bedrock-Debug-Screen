@@ -2,29 +2,55 @@
 // eslint-disable-next-line import/no-unresolved
 import { world, system } from '@minecraft/server'
 
-// TODO: Add biome type at block location once the APIs support.
-
 /**
  * The Player class defines an entity controlled by a human player.
  * @typedef {import('@minecraft/server').Player} Player
  */
 
+const BRAILLE_OFFSET = 10240
+
+console.warn('[DEBUGPACK] Loaded debug pack script ✅')
+
+/**
+ * Offsets every non-space codepoint in a string by `delta` (spaces are preserved).
+ * @param {string} input
+ * @param {number} delta
+ * @returns {string}
+ */
+function offsetString(input, delta) {
+    let out = ''
+    for (const ch of String(input ?? '')) {
+        if (ch === ' ') {
+            out += ' '
+            continue
+        }
+        out += String.fromCodePoint(ch.codePointAt(0) + delta)
+    }
+    return out
+}
+
+/**
+ * True if the message contains either the literal command or its +10240-offset encoded variant.
+ * @param {string} message
+ * @param {string} command
+ * @returns {boolean}
+ */
+function messageContainsCommand(message, command) {
+    const msg = String(message ?? '').normalize('NFKC')
+    return msg.includes(offsetString(command, 0)) || msg.includes(offsetString(command, BRAILLE_OFFSET))
+}
+
 /**
  * Turns Minecraft's day tick number into a 24 based hour time string (e.g. 23:59).
  * @param {number} time The game tick time. Must be coercible to an integer between 0 and 24000.
  * @returns {string|undefined} The translated time of day value.
- * If the provided time was not coercible to an integer, then it returns `undefined`
  */
 function translateTimeOfDay(time) {
     const safeTime = parseInt(time, 10)
-    if (!safeTime || safeTime > 24000 || safeTime < 0) {
-        return undefined
-    }
+    if (!safeTime || safeTime > 24000 || safeTime < 0) return undefined
 
-    let minecraftTime = 6 + (safeTime / 24000) * 24 // Day tick 0 corresponds to 6:00 AM
-    if (minecraftTime > 24) {
-        minecraftTime -= 24 // Normalize in the 0-24 hour range
-    }
+    let minecraftTime = 6 + (safeTime / 24000) * 24
+    if (minecraftTime > 24) minecraftTime -= 24
 
     const hour = Math.floor(minecraftTime)
     const minute = Math.floor((minecraftTime - hour) * 60)
@@ -33,21 +59,17 @@ function translateTimeOfDay(time) {
 
 /**
  * Starts the interval command that shows the debug menu for a player.
- * @param {Player} player An instance of a Minecraft `Player` class entity object
- * @returns {function} a function handle that can be used to clear the `setInterval` call later.
+ * @param {Player} player
+ * @returns {number} interval handle usable with system.clearRun(handle)
  */
 function showDebugInfo(player) {
-    // Calculations run every tick
     return system.runInterval(() => {
         const { location } = player
 
         const playerSpawn = player.getSpawnPoint()
         let playerSpawnString = ''
         if (playerSpawn) {
-            const spawnDimension = playerSpawn.dimension.id.substring(
-                10,
-                playerSpawn.dimension.id.length
-            )
+            const spawnDimension = playerSpawn.dimension.id.substring(10)
             playerSpawnString = `${spawnDimension} (${playerSpawn?.x}, ${playerSpawn?.y}, ${playerSpawn?.z})`
         } else {
             const defaultSpawn = world.getDefaultSpawnLocation()
@@ -55,13 +77,11 @@ function showDebugInfo(player) {
         }
 
         const playerBlock = {
-            // The block coordinates the player occupies
             x: Math.floor(location.x),
             y: Math.floor(location.y),
             z: Math.floor(location.z)
         }
         const playerChunk = {
-            // The chunk the player is in
             x: Math.floor(playerBlock.x / 16),
             y: Math.floor(playerBlock.y / 16),
             z: Math.floor(playerBlock.z / 16)
@@ -69,7 +89,6 @@ function showDebugInfo(player) {
         const playerChunkString = `${playerChunk.x}, ${playerChunk.y}, ${playerChunk.z}`
 
         const playerChunkPosition = {
-            // The relative position within that chunk
             x: playerBlock.x % 16,
             y: playerBlock.y % 16,
             z: playerBlock.z % 16
@@ -83,21 +102,13 @@ function showDebugInfo(player) {
         const block = player.getBlockFromViewDirection()
         let blockString = ''
         if (block?.block.isValid) {
-            // If no block is returned, or block is in an unloaded chunk, trying any of these operations throws an error
-            if (block.block.isWaterlogged) {
-                blockString = 'waterlogged '
-            }
-            if (block.block.typeId.substring(0, 10) === 'minecraft:') {
-                // Removes the minecraft namespace for brevity
-                blockString += block.block.typeId.substring(10, block.block.typeId.length)
-            } else {
-                blockString += block.block.typeId // If not minecraft namespace, use the full value
-            }
+            if (block.block.isWaterlogged) blockString = 'waterlogged '
+            blockString += block.block.typeId.startsWith('minecraft:')
+                ? block.block.typeId.substring(10)
+                : block.block.typeId
             blockString += ` (${block.block.x}, ${block.block.y}, ${block.block.z})`
             const redstonePower = block.block.getRedstonePower()
-            if (redstonePower) {
-                blockString += `, Redstone Power: ${block.block.getRedstonePower()}`
-            }
+            if (redstonePower) blockString += `, Redstone Power: ${redstonePower}`
         } else {
             blockString = 'None'
         }
@@ -105,63 +116,36 @@ function showDebugInfo(player) {
         const entity = player.getEntitiesFromViewDirection()[0]
         let entityString = ''
         if (entity?.entity.typeId) {
-            if (entity.entity.typeId.substring(0, 10) === 'minecraft:') {
-                entityString += entity.entity.typeId.substring(10, entity.entity.typeId.length)
-            } else {
-                entityString += entity.typeId
-            }
+            entityString += entity.entity.typeId.startsWith('minecraft:')
+                ? entity.entity.typeId.substring(10)
+                : entity.entity.typeId
 
-            if (entity?.entity.nameTag) {
-                entityString += ` "${entity.entity.nameTag}" `
-            }
+            if (entity?.entity.nameTag) entityString += ` "${entity.entity.nameTag}" `
 
             const loc = entity.entity.location
             entityString += ` (${loc.x.toFixed(1)}, ${loc.y.toFixed(1)}, ${loc.z.toFixed(1)})`
 
-            if (entity?.entity.getComponent('minecraft:health')) {
-                entityString += `, Health: ${
-                    entity.entity.getComponent('minecraft:health').currentValue
-                } `
-            }
+            const health = entity?.entity.getComponent('minecraft:health')
+            if (health) entityString += `, Health: ${health.currentValue} `
         } else {
             entityString = 'None'
         }
 
         let moonPhaseString = ''
         switch (world.getMoonPhase()) {
-            case 1:
-                moonPhaseString = 'Waning Gibbous'
-                break
-            case 2:
-                moonPhaseString = 'First Quarter'
-                break
-            case 3:
-                moonPhaseString = 'Waning Crescent'
-                break
-            case 4:
-                moonPhaseString = 'New Moon'
-                break
-            case 5:
-                moonPhaseString = 'Waxing Crescent'
-                break
-            case 6:
-                moonPhaseString = 'Last Quarter'
-                break
-            case 7:
-                moonPhaseString = 'Waxing Gibbous'
-                break
-            default:
-                moonPhaseString = 'Full Moon'
-                break
+            case 1: moonPhaseString = 'Waning Gibbous'; break
+            case 2: moonPhaseString = 'First Quarter'; break
+            case 3: moonPhaseString = 'Waning Crescent'; break
+            case 4: moonPhaseString = 'New Moon'; break
+            case 5: moonPhaseString = 'Waxing Crescent'; break
+            case 6: moonPhaseString = 'Last Quarter'; break
+            case 7: moonPhaseString = 'Waxing Gibbous'; break
+            default: moonPhaseString = 'Full Moon'; break
         }
 
-        // Display the final output
-        // The final blank lines at the end are for action bar positioning above the hot bar to minimize interference
         player.onScreenDisplay.setActionBar(
             // eslint-disable-next-line prettier/prettier
-            `${
-                player.name
-            }                                                                                             
+            `${player.name}                                                                                             
 Player Spawn Point: ${playerSpawnString}
 Position / Velocity
 X: ${location.x.toFixed(2).padStart(8, ' ')} / ${velocity.x.toFixed(6)}
@@ -174,7 +158,7 @@ Looking at
   Block:  ${blockString}
   Entity: ${entityString}
 
-Dimension: ${player.dimension.id.substring(10, player.dimension.id.length)}
+Dimension: ${player.dimension.id.substring(10)}
 Weather:   ${world.getDimension(player.dimension.id).getWeather()}
 Day ${day} ${translateTimeOfDay(world.getTimeOfDay())}
 Moon Phase: ${moonPhaseString}
@@ -187,37 +171,81 @@ Moon Phase: ${moonPhaseString}
     })
 }
 
-// Set up the custom command listeners
-let runningDebugFunctionCallback
-let debugHasBeenActivatedBefore = false
-world.beforeEvents.chatSend.subscribe((eventData) => {
-    const player = eventData.sender
-    if (eventData.message === '!debug on' && debugHasBeenActivatedBefore === false) {
-        // Must not let this function run if it already has been. If it is run twice, the user will not be able
-        //  to clear this callback function from the system and it will run forever.
-        runningDebugFunctionCallback = showDebugInfo(player)
-        debugHasBeenActivatedBefore = true
+/**
+ * Prefer a stable per-player key.
+ * `player.id` exists in modern Script API; fall back to name if needed.
+ * @param {Player} player
+ * @returns {string}
+ */
+function playerKey(player) {
+    return String(player?.id ?? player?.name ?? '')
+}
 
-        // ESLint thinks this next line is invalid because it erroneously believes eventData.cancel is read only, but it
-        //      isn't. This line prevents showing the typed custom command text in the chat window.
-        // eslint-disable-next-line no-param-reassign
-        eventData.cancel = true
-    } else if (eventData.message === '!debug off') {
-        if (debugHasBeenActivatedBefore) {
-            // system.clearRun will throw an error if clearing a function that was never set to run before
-            system.clearRun(runningDebugFunctionCallback)
-        }
-        // Initially, this script called the player.onScreenDisplay.setActionBar command directly.
-        //  This started throwing errors when upgrading to @minecraft/server 1.12.0-beta because
-        //  you can no longer do that directly. It has to be wrapped in a system.run() call.
-        system.run(() => {
-            player.onScreenDisplay.setActionBar('Debug Menu Closed')
-        })
-        debugHasBeenActivatedBefore = false
+// Per-player interval handles
+/** @type {Map<string, number>} */
+const activeDebugIntervals = new Map()
 
-        // ESLint thinks this next line is invalid because it erroneously believes eventData.cancel is read only, but it
-        //      isn't. This line prevents showing the typed custom command text in the chat window.
-        // eslint-disable-next-line no-param-reassign
-        eventData.cancel = true
+function enableDebugForPlayer(player) {
+    const key = playerKey(player)
+    if (!key) return
+
+    if (activeDebugIntervals.has(key)) {
+        system.run(() => player.onScreenDisplay.setActionBar('Debug already enabled'))
+        return
+    }
+
+    const handle = showDebugInfo(player)
+    activeDebugIntervals.set(key, handle)
+    system.run(() => player.onScreenDisplay.setActionBar('Debug Menu Opened'))
+}
+
+function disableDebugForPlayer(player) {
+    const key = playerKey(player)
+    if (!key) return
+
+    const handle = activeDebugIntervals.get(key)
+    if (handle !== undefined) {
+        system.clearRun(handle)
+        activeDebugIntervals.delete(key)
+    }
+
+    system.run(() => player.onScreenDisplay.setActionBar('Debug Menu Closed'))
+}
+
+// Optional cleanup when players leave
+world.afterEvents.playerLeave.subscribe((ev) => {
+    const key = String(ev.playerId ?? '')
+    const handle = activeDebugIntervals.get(key)
+    if (handle !== undefined) {
+        system.clearRun(handle)
+        activeDebugIntervals.delete(key)
     }
 })
+
+const chatEvent = world?.beforeEvents?.chatSend ?? null
+if (!chatEvent) {
+    console.error('[DEBUGPACK] world.beforeEvents.chatSend not available — cannot subscribe ❌')
+} else {
+    try {
+        chatEvent.subscribe((eventData) => {
+            const player = eventData.sender
+
+            if (messageContainsCommand(eventData.message, '?debug on')) {
+                enableDebugForPlayer(player)
+                // eslint-disable-next-line no-param-reassign
+                eventData.cancel = true
+                return
+            }
+
+            if (messageContainsCommand(eventData.message, '?debug off')) {
+                disableDebugForPlayer(player)
+                // eslint-disable-next-line no-param-reassign
+                eventData.cancel = true
+            }
+        })
+
+        console.warn('[DEBUGPACK] Subscribed to chatSend ✅')
+    } catch (e) {
+        console.error(`[DEBUGPACK] Failed to subscribe to chatSend: ${e}\n${e?.stack ?? ''}`)
+    }
+}
